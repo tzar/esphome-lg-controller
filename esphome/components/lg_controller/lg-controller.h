@@ -163,6 +163,10 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     LgSwitch& internal_thermistor_;
     LgSwitch& auto_dry_;
 
+    // Optional zone damper switches on duct units (zones 1-4).
+    static constexpr uint8_t NumZones = 4;
+    LgSwitch* zones_[NumZones] = {};
+
     uint8_t recv_buf_[MsgLen] = {};
     uint32_t recv_buf_len_ = 0;
     uint32_t last_recv_millis_ = 0;
@@ -212,6 +216,9 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     enum class MessageSender : uint8_t { Unit, Master, Slave };
     // Set if this controller is configured as slave controller.
     const bool slave_;
+    // Installer settings for zoning that a master controller has to send (see climate.py).
+    bool zone_type_new_ = false;
+    uint8_t zone_count_ = 0;
 
     enum class LgCapability {
         FAN_AUTO,
@@ -436,6 +443,17 @@ public:
         });
     }
 
+    void set_zone_switch(uint8_t index, LgSwitch* zone) {
+        zones_[index] = zone;
+        zone->add_on_state_callback([this](bool) {
+            if (!is_initializing_ && !ignore_switch_callback_) {
+                pending_status_change_ = true;
+            }
+        });
+    }
+    void set_zone_type_new(bool value) { zone_type_new_ = value; }
+    void set_zone_count(uint8_t count) { zone_count_ = count; }
+
     float get_setup_priority() const override {
         return esphome::setup_priority::BUS;
     }
@@ -463,6 +481,16 @@ public:
         }
 
         internal_thermistor_.restore_and_set_mode(esphome::switch_::SWITCH_RESTORE_DEFAULT_OFF);
+
+        // The zone switches are reported to HA as soon as the API connects, before the first
+        // message from the bus. Restore the last known state so that doesn't show up as "all
+        // zones closed" for the first seconds after every boot. The callbacks don't fire a send
+        // while initializing.
+        for (LgSwitch* zone : zones_) {
+            if (zone != nullptr) {
+                zone->restore_and_set_mode(esphome::switch_::SWITCH_RESTORE_DEFAULT_OFF);
+            }
+        }
 
         // Publish without calling set_sleep_timer(), which would queue a status change.
         ignore_sleep_timer_callback_ = true;
@@ -510,6 +538,11 @@ public:
     }
 
 private:
+    // Status message byte 5: zone 1 = 0x40, zone 2 = 0x20, zone 3 = 0x10, zone 4 = 0x08.
+    static uint8_t zone_bit(uint8_t index) {
+        return 0x40 >> index;
+    }
+
     // Sets position of vane index (1-4) to position (0-6).
     void set_vane_position(int index, int position) {
         if (index < 1 || index > 4) {
@@ -754,10 +787,34 @@ private:
         }
 
         // Byte 5. Unchanged except for the low bit which indicates the target temperature has a
-        // 0.5 fractional part.
+        // 0.5 fractional part, and the zone bits on duct units.
         send_buf_[5] = last_recv_status_[5] & ~0x1;
         if (target - uint8_t(target) == 0.5) {
             send_buf_[5] |= 0x1;
+        }
+        uint8_t zone_bits = 0;
+        bool have_zones = false;
+        for (uint8_t i = 0; i < NumZones; i++) {
+            if (zones_[i] != nullptr) {
+                have_zones = true;
+                if (zones_[i]->state) {
+                    zone_bits |= zone_bit(i);
+                }
+            }
+        }
+        // Never close all zones: the unit may be running. Also all switches off is what the
+        // state looks like before the first sync. In both cases keep the unit's current zones.
+        if (have_zones && zone_bits != 0) {
+            uint8_t mask = 0;
+            for (uint8_t i = 0; i < NumZones; i++) {
+                if (zones_[i] != nullptr) {
+                    mask |= zone_bit(i);
+                }
+            }
+            send_buf_[5] = (send_buf_[5] & ~mask) | zone_bits;
+        }
+        if (!slave_ && zone_type_new_) {
+            send_buf_[5] |= 0x80;
         }
 
         // Byte 6: thermistor setting and target temperature (fractional part in byte 5).
@@ -891,6 +948,11 @@ private:
 
         // Byte 2 stores installer setting 15.
         send_buf_[2] = (send_buf_[2] & 0xC7) | (overheating_ << 3);
+
+        // Byte 10 bits 4-7: number of zones on duct units (Zone Number installer setting).
+        if (!slave_ && zone_count_ != 0) {
+            send_buf_[10] = (send_buf_[10] & 0x0F) | (zone_count_ << 4);
+        }
 
         send_buf_[12] = calc_checksum(send_buf_);
 
@@ -1099,6 +1161,11 @@ private:
 
         ignore_switch_callback_ = true;
         purifier_.publish_state(buffer[2] & 0x4);
+        for (uint8_t i = 0; i < NumZones; i++) {
+            if (zones_[i] != nullptr) {
+                zones_[i]->publish_state(buffer[5] & zone_bit(i));
+            }
+        }
         ignore_switch_callback_ = false;
 
         bool horiz_swing = buffer[2] & 0x40;

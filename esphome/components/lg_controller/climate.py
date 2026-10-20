@@ -18,6 +18,8 @@ LgSwitch = lg_controller_ns.class_("LgSwitch", switch.Switch, cg.Component)
 
 CONF_FAHRENHEIT = "fahrenheit"
 CONF_IS_SLAVE_CONTROLLER = "is_slave_controller"
+CONF_ZONE_TYPE_NEW = "zone_type_new"
+CONF_ZONE_COUNT = "zone_count"
 
 CONF_TEMPERATURE_SENSOR = "temperature_sensor"
 
@@ -47,6 +49,9 @@ CONF_PURIFIER = "purifier"
 CONF_INTERNAL_THERMISTOR = "internal_thermistor"
 CONF_AUTO_DRY = "auto_dry"
 
+# Zone dampers on duct units.
+CONF_ZONES = ["zone1", "zone2", "zone3", "zone4"]
+
 VANE_OPTIONS = ["0 (Default)", "1 (Up)", "2", "3", "4", "5", "6 (Down)"]
 OVERHEATING_OPTIONS = ["0 (Default)", "1 (+4C/+6C)", "2 (+2C/+4C)", "3 (-1C/+1C)", "4 (-0.5C/+0.5C)"]
 
@@ -56,6 +61,12 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
 
         cv.Required(CONF_FAHRENHEIT): cv.boolean,
         cv.Required(CONF_IS_SLAVE_CONTROLLER): cv.boolean,
+        # Master only: installer setting "Zone Type = New" (status byte 5 bit 7). Without it,
+        # the unit ignores the zone bits.
+        cv.Optional(CONF_ZONE_TYPE_NEW, default=False): cv.boolean,
+        # Master only: installer setting "Zone Number" (type B settings byte 10 bits 4-7). The
+        # unit does no zoning while this is 0. 0 = don't change what the unit reports.
+        cv.Optional(CONF_ZONE_COUNT, default=0): cv.int_range(min=0, max=8),
 
         cv.Optional(CONF_TEMPERATURE_SENSOR): cv.use_id(sensor.Sensor),
 
@@ -84,6 +95,8 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
         cv.Required(CONF_PURIFIER): switch.switch_schema(LgSwitch),
         cv.Required(CONF_INTERNAL_THERMISTOR): switch.switch_schema(LgSwitch),
         cv.Required(CONF_AUTO_DRY): switch.switch_schema(LgSwitch),
+
+        **{cv.Optional(zone): switch.switch_schema(LgSwitch) for zone in CONF_ZONES},
     }
 ).extend(cv.COMPONENT_SCHEMA).extend(uart.UART_DEVICE_SCHEMA)
 
@@ -138,6 +151,12 @@ async def to_code(config):
                            defrost, preheat, outdoor, auto_dry_active,
                            purifier, internal_thermistor, auto_dry,
                            config[CONF_FAHRENHEIT], config[CONF_IS_SLAVE_CONTROLLER])
+    for index, zone in enumerate(CONF_ZONES):
+        if zone in config:
+            zone_switch = await switch.new_switch(config[zone])
+            cg.add(var.set_zone_switch(index, zone_switch))
+    cg.add(var.set_zone_type_new(config[CONF_ZONE_TYPE_NEW]))
+    cg.add(var.set_zone_count(config[CONF_ZONE_COUNT]))
     await climate.register_climate(var, config)
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)

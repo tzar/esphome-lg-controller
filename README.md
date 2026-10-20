@@ -120,11 +120,31 @@ Features currently available in Home Assistant:
 * Input fields for fan speed installer setting (to fine-tune fan speeds, 0-255 with 0 being factory default). This is installer setting 3 (ESP Setting) on LG controllers.
 * Select option for over heating installer setting from 0-4 (to change over heating behavior in heating mode). This is installer setting 15 (Over Heating) on LG controllers.
 * YAML options for Fahrenheit mode and 'slave' controller mode.
+* Optional switches for zones 1-4 on duct units with zone dampers (see [Zone control](#zone-control)).
 * Detects & exposes only supported operation/fan/swing modes for the connected indoor unit.
 
 The LG ThinQ app and wireless remote can still be used to change these settings and other settings. They'll be synchronized with this controller.
 
 Unfortunately not all settings are exposed to the wired controller, but if you're interested in a feature and it's supported by the PREMTB100 or PREMTA200 controller, please open an issue and we can consider adding it.
+
+## Zone control
+Duct units with a zone controller board open and close zone dampers from bits in the status message. To use them, add the zones you have to the `lg_controller` entry in `base.yaml`:
+
+```yaml
+    zone1:
+      name: Zone 1
+    zone2:
+      name: Zone 2
+    # zone3, zone4 likewise
+    # Only needed if this controller is the master (see below).
+    zone_type_new: true
+    zone_count: 4
+```
+
+* The switches show the dampers' state as reported on the bus and can be used to open/close them, in master and in slave mode.
+* The controller never sends "all zones closed". If the switches would close every zone, the unit's current zones are kept.
+* If this controller is the **master**, it has to send the zone installer settings that an LG wall controller would otherwise send: `zone_type_new: true` (installer setting "Zone Type = New") and `zone_count` (installer setting "Zone Number", the number of zones on the zone board). On my unit (B42AWYU3G5 with a 4-zone board), the unit ignored the zone bits without Zone Type = New, and forgot the Zone Number on every power cycle, doing no zoning at all until the master wrote it again. A slave doesn't need these settings.
+* Zones 5-8 are not supported yet.
 
 # Tips
 * [Issue #43](https://github.com/JanM321/esphome-lg-controller/issues/43) has some information on temperature sensors that work well for this.

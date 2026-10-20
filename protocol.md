@@ -75,7 +75,7 @@ The controller and AC unit will send this when a setting changes. The AC unit wi
 |   | `000X_0000` | Zone 3 on |
 |   | `00X0_0000` | Zone 2 on |
 |   | `0X00_0000` | Zone 1 on |
-|   | `X000_0000` | Set if installer setting Zone Type is set to New |
+|   | `X000_0000` | Set if installer setting Zone Type is set to New<br>The setting lives in the master controller; the unit echoes it and ignores the zone bits while it's clear. |
 | 6 | `0000_XXXX` | Setpoint, stored as `temperature - 15` (example: 4 => 19°C or 19.5°C depending on byte 5)<br>In AI mode: -2 to +2 stored as 0-4 |
 |   | `00XX_0000` | Thermistor installer setting<br>0: unit<br>1: controller<br>2: 2TH |
 |   | `XX00_0000` | Ceiling height installer setting<br>0: medium<br>1: low<br>2: high<br>3: very high |
@@ -255,7 +255,7 @@ Type 0xA messages store more advanced settings and are only sent when the AC is 
 |   | `000X_0000` | Refrigerant leak detector, installer setting 29<br>0: not installed<br>1: installed |
 |   | `XX00_0000` | Fan operation in cooling mode and thermal off conditions, installer setting 35<br>0: fan low<br>1: fan off<br>2: fan setting |
 | 10| `0000_XXXX` | Static pressure step, installer setting 32 (0-11) |
-|   | `XXXX_0000` | Number of zones configured for duct units (Zone Number installer setting) |
+|   | `XXXX_0000` | Number of zones configured for duct units (Zone Number installer setting)<br>Seen on a B42AWYU3G5: after a power cycle the unit reports 0 here and does no zoning until the master controller sends the real value. |
 | 11| `0000_XXXX` | Emergency heater, installer setting 18, low ambient heating operation (0-15) |
 | 12 | `XXXX_XXXX` | Checksum |
 
